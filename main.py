@@ -3,9 +3,7 @@ from pathlib import Path
 
 mcp = FastMCP('filesystem-server')
 
-# ── Base directory ──────────────────────────────────────────────────────────
-# All file operations are sandboxed to this folder.
-# Change this path if you want to point to a different directory.
+
 BASE_DIR = Path(r'C:\Users\lamic\Downloads').resolve()
 
 def safe_path(path: str) -> Path:
