@@ -76,6 +76,8 @@ def read_multiple_files(paths:List[str])-> dict[str, str]:
     return result
 
 
+
+
 @mcp.tool()
 def write_file(path: str, content: str) -> str:
     """
@@ -90,6 +92,35 @@ def write_file(path: str, content: str) -> str:
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(content, encoding='utf-8')
     return f"File written successfully: {p}"
+
+
+@mcp.tool()
+def write_multiple_files(files:dict[str,str]) -> dict[str,str]:
+    """
+    Write multiple files at once.
+    Args:
+        files:Dictionary where:
+                - key = file path(relative to BASE_DIR)
+                - value = content to write            
+    Example:
+        {
+            'hello.py': 'print('Hello World)',
+            'README.md':" # My Project\n\nDescription here...",
+            'config/settings.json' : '{'debug':true}
+        }
+    Returns:
+        Dictionary with results for each file(success or error message)
+    """
+    result={}
+    for path,content in files.items():
+        try:
+            p=safe_path(path)
+            p.parent.mkdir(parents=True,exist_ok=True)
+            p.write_text(str(content),encoding='utf-8')
+            result[path]=f'Successfully written:{p}'
+        except Exception as e:
+            result[path]=f'Error:{str(e)}'
+    return result
 
 
 @mcp.tool()
