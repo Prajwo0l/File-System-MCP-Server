@@ -53,6 +53,30 @@ def read_file(path: str) -> str:
 
 
 @mcp.tool()
+def read_multiple_files(paths:List[str])-> dict[str, str]:
+    """
+    Read multiple files at once and return their contents.
+    Args:
+        paths: List of file paths relative to the base directory.
+    Returns:
+        A dictionary where key=filepath,value=file content or error message.
+    """
+    result={}
+    for path in paths:
+        try :
+            p=safe_path(path)
+            if not p.exists():
+                result[path]=f'File does not exist:{path}'
+            elif not p.is_file():
+                result[path]=f"'{path}'is a directory , not a file." 
+            else:
+                result[path]=p.read_text(encoding='utf-8',errors='replace')
+        except Exception as e:
+            result[path]=f'Error reading file:{str(e)}'    
+    return result
+
+
+@mcp.tool()
 def write_file(path: str, content: str) -> str:
     """
     Write (or overwrite) a file with the given content.
@@ -71,7 +95,8 @@ def write_file(path: str, content: str) -> str:
 @mcp.tool()
 def delete_file(path: str) -> str:
     """
-    Delete a file from the base directory.
+    Delete a single file from the base directory.
+    Use delete_folder to remove a directory.
 
     Args:
         path: File path relative to the base directory (e.g. 'old_notes.txt').
@@ -80,9 +105,30 @@ def delete_file(path: str) -> str:
     if not p.exists():
         return f"File does not exist: {path}"
     if not p.is_file():
-        return f"'{path}' is a directory. Only files can be deleted with this tool."
+        return f"'{path}' is a directory — use delete_folder to remove directories."
     p.unlink()
     return f"File deleted: {path}"
+
+
+@mcp.tool()
+def delete_folder(path: str) -> str:
+    """
+    Delete a folder and ALL its contents recursively from the base directory.
+    This is irreversible — use with caution.
+
+    Args:
+        path: Folder path relative to the base directory (e.g. 'old_project').
+    """
+    import shutil
+    p = safe_path(path)
+    if not p.exists():
+        return f"Folder does not exist: {path}"
+    if not p.is_dir():
+        return f"'{path}' is a file — use delete_file to remove files."
+    shutil.rmtree(p)
+    return f"Folder deleted: {path}"
+
+
 
 
 # ── Entry point ──────────────────────────────────────────────────────────────
