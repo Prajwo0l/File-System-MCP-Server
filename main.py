@@ -1,15 +1,26 @@
-from fastmcp import FastMCP
+from __future__ import annotations
+
+import shutil
 from pathlib import Path
+from typing import List
+
+from fastmcp import FastMCP
 
 mcp = FastMCP('filesystem-server')
 
-
 BASE_DIR = Path(r'C:\Users\lamic\Downloads').resolve()
 
+
 def safe_path(path: str) -> Path:
-    """Resolve a relative path inside BASE_DIR and reject path-traversal attempts."""
+    """
+    Resolve *path* relative to BASE_DIR.
+    Uses Path.relative_to() — immune to Windows drive-letter casing issues.
+    Raises ValueError if the resolved path escapes the sandbox.
+    """
     p = (BASE_DIR / path).resolve()
-    if not str(p).startswith(str(BASE_DIR)):
+    try:
+        p.relative_to(BASE_DIR)
+    except ValueError:
         raise ValueError(f"Access denied: '{path}' is outside the allowed directory.")
     return p
 
@@ -17,15 +28,15 @@ def safe_path(path: str) -> Path:
 # ── Tools ────────────────────────────────────────────────────────────────────
 
 @mcp.tool()
-def list_files(subdir: str = '') -> list[str]:
+def list_files(subdir: str = '') -> List[str]:
     """
-    List all files and folders inside the base directory (or a subdirectory).
+    List all files and folders inside the Downloads directory (or a subdirectory).
 
     Args:
-        subdir: Optional subfolder path relative to the base directory.
-                Leave empty to list the base directory itself.
+        subdir: Optional subfolder path relative to Downloads.
+                Leave empty (or pass '') to list Downloads itself.
 
-    Returns a list of entry names with a [DIR] or [FILE] prefix.
+    Returns a list of entries with a [DIR] or [FILE] prefix.
     """
     target = safe_path(subdir) if subdir else BASE_DIR
     if not target.exists():
@@ -42,7 +53,7 @@ def read_file(path: str) -> str:
     Read and return the text contents of a file.
 
     Args:
-        path: File path relative to the base directory (e.g. 'notes.txt').
+        path: File path relative to Downloads (e.g. 'notes.txt' or 'myproject/main.py').
     """
     p = safe_path(path)
     if not p.exists():
@@ -53,40 +64,60 @@ def read_file(path: str) -> str:
 
 
 @mcp.tool()
-def read_multiple_files(paths:List[str])-> dict[str, str]:
+def read_multiple_files(paths: List[str]) -> dict[str, str]:
     """
-    Read multiple files at once and return their contents.
+    Read multiple files at once and return their contents as a dict.
+
     Args:
-        paths: List of file paths relative to the base directory.
+        paths: List of file paths relative to Downloads.
+
     Returns:
-        A dictionary where key=filepath,value=file content or error message.
+        {filepath: content_or_error_message, ...}
     """
-    result={}
+    result: dict[str, str] = {}
     for path in paths:
-        try :
-            p=safe_path(path)
+        try:
+            p = safe_path(path)
             if not p.exists():
-                result[path]=f'File does not exist:{path}'
+                result[path] = f"File does not exist: {path}"
             elif not p.is_file():
-                result[path]=f"'{path}'is a directory , not a file." 
+                result[path] = f"'{path}' is a directory, not a file."
             else:
-                result[path]=p.read_text(encoding='utf-8',errors='replace')
+                result[path] = p.read_text(encoding='utf-8', errors='replace')
         except Exception as e:
-            result[path]=f'Error reading file:{str(e)}'    
+            result[path] = f"Error reading file: {str(e)}"
     return result
 
 
+@mcp.tool()
+def create_folder(path: str) -> str:
+    """
+    Create a folder (and any missing parent folders) inside Downloads.
+    Safe to call even if the folder already exists.
+
+    Args:
+        path: Folder path relative to Downloads (e.g. 'myproject' or 'myproject/src').
+
+    Use this when you need to guarantee a directory exists before writing files into it.
+    NOTE: write_file and write_multiple_files already call this automatically, so you
+    only need this tool when you explicitly want to create an empty folder.
+    """
+    p = safe_path(path)
+    p.mkdir(parents=True, exist_ok=True)
+    return f"Folder ready: {p}"
 
 
 @mcp.tool()
 def write_file(path: str, content: str) -> str:
     """
-    Write (or overwrite) a file with the given content.
-    Parent directories are created automatically if they don't exist.
+    Write (or overwrite) a single file. Parent folders are created automatically.
 
     Args:
-        path:    File path relative to the base directory (e.g. 'notes.txt').
+        path:    File path relative to Downloads (e.g. 'notes.txt' or 'project/main.py').
         content: Text content to write.
+
+    IMPORTANT: For writing multiple files at once, use write_multiple_files instead —
+    it is more efficient and handles entire project structures in one call.
     """
     p = safe_path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
@@ -95,42 +126,64 @@ def write_file(path: str, content: str) -> str:
 
 
 @mcp.tool()
-def write_multiple_files(files:dict[str,str]) -> dict[str,str]:
+def write_multiple_files(files: dict[str, str]) -> dict[str, str]:
     """
-    Write multiple files at once.
+    Write multiple files at once. ALL intermediate folders are created automatically.
+
+    Use this tool whenever the user asks to create more than one file,
+    set up a project structure, or write an entire codebase — never call
+    write_file in a loop when this tool is available.
+
     Args:
-        files:Dictionary where:
-                - key = file path(relative to BASE_DIR)
-                - value = content to write            
-    Example:
+        files: A JSON object (dict) mapping each file path to its content.
+               Paths are relative to Downloads and MAY include sub-folders.
+
+    Schema:
         {
-            'hello.py': 'print('Hello World)',
-            'README.md':" # My Project\n\nDescription here...",
-            'config/settings.json' : '{'debug':true}
+          "relative/path/to/file.ext": "file content as a string",
+          ...
         }
+
+    Examples:
+        Single folder project:
+        {
+          "hello_project/main.py":      "print('Hello World')",
+          "hello_project/README.md":    "# Hello Project",
+          "hello_project/utils/math.py": "def add(a, b): return a + b"
+        }
+
+        Config + source:
+        {
+          "app/config.json":  "{\"debug\": true}",
+          "app/server.py":    "from flask import Flask\\napp = Flask(__name__)"
+        }
+
     Returns:
-        Dictionary with results for each file(success or error message)
+        {filepath: "Successfully written: <full_path>" or "Error: <message>", ...}
+
+    NOTE: Sub-folders like "myproject/src/" are created automatically.
+    You do NOT need to call create_folder first.
     """
-    result={}
-    for path,content in files.items():
+    result: dict[str, str] = {}
+    for path, content in files.items():
         try:
-            p=safe_path(path)
-            p.parent.mkdir(parents=True,exist_ok=True)
-            p.write_text(str(content),encoding='utf-8')
-            result[path]=f'Successfully written:{p}'
+            p = safe_path(path)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(str(content), encoding='utf-8')
+            result[path] = f"Successfully written: {p}"
         except Exception as e:
-            result[path]=f'Error:{str(e)}'
+            result[path] = f"Error: {str(e)}"
     return result
 
 
 @mcp.tool()
 def delete_file(path: str) -> str:
     """
-    Delete a single file from the base directory.
-    Use delete_folder to remove a directory.
+    Delete a single file from Downloads.
+    To delete a folder use delete_folder instead.
 
     Args:
-        path: File path relative to the base directory (e.g. 'old_notes.txt').
+        path: File path relative to Downloads (e.g. 'old_notes.txt').
     """
     p = safe_path(path)
     if not p.exists():
@@ -144,13 +197,11 @@ def delete_file(path: str) -> str:
 @mcp.tool()
 def delete_folder(path: str) -> str:
     """
-    Delete a folder and ALL its contents recursively from the base directory.
-    This is irreversible — use with caution.
+    Delete a folder and ALL its contents recursively. This is irreversible.
 
     Args:
-        path: Folder path relative to the base directory (e.g. 'old_project').
+        path: Folder path relative to Downloads (e.g. 'old_project').
     """
-    import shutil
     p = safe_path(path)
     if not p.exists():
         return f"Folder does not exist: {path}"
@@ -158,8 +209,6 @@ def delete_folder(path: str) -> str:
         return f"'{path}' is a file — use delete_file to remove files."
     shutil.rmtree(p)
     return f"Folder deleted: {path}"
-
-
 
 
 # ── Entry point ──────────────────────────────────────────────────────────────
